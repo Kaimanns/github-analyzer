@@ -1,0 +1,4 @@
+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 -- profil api kodu kaybetme
+http://localhost:3000/api/analyze
+http://localhost:3000/api/analyze?username=torvalds
+http://localhost:3000/api/analyze?username=gaearon

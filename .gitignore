@@ -39,3 +39,26 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Python (Sanal ortam ve önbellek)
+venv/
+.venv/
+env/
+Lib/
+bin/
+include/
+__pycache__/
+*.py[cod]
+
+# Veri ve Log dosyaları
+*.txt
+*.log
+# Python executables ve Scripts klasörü
+Scripts/
+*.exe
+
+# Makine öğrenmesi modelleri (Genelde çok büyük olurlar)
+*.pkl
+
+# Geçici Python dosyaları
+get-pip.py
