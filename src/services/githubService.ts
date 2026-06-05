@@ -17,6 +17,8 @@ export interface TopRepo {
   language: string | null;
   url: string;
   description: string | null;
+  updatedAt?: string;
+  isFork?: boolean;
 }
 
 export interface GitHubProfile {
@@ -42,8 +44,11 @@ export interface GitHubProfile {
   // Dil analizi (yüzdelik, büyükten küçüğe)
   languageStats: LanguageStat[];
 
-  // En popüler 3 repo (yıldıza göre)
+  // En popüler 5 repo (yıldıza göre) — AI analizi için
   topRepos: TopRepo[];
+
+  // Tüm repolar (max 50, yıldıza göre) — Proje Gezgini için
+  allRepos: TopRepo[];
 }
 
 // ─────────────────────────────────────────────
@@ -148,10 +153,10 @@ export async function getFullProfile(username: string): Promise<GitHubProfile> {
   const totalStars = repos.reduce((acc, r) => acc + (r.stargazers_count ?? 0), 0);
   const totalForks = repos.reduce((acc, r) => acc + (r.forks_count ?? 0), 0);
 
-  // 5. En popüler 3 repo
+  // 5. En popüler 5 repo (AI bağlamı için)
   const topRepos: TopRepo[] = [...repos]
     .sort((a, b) => (b.stargazers_count ?? 0) - (a.stargazers_count ?? 0))
-    .slice(0, 3)
+    .slice(0, 5)
     .map((r) => ({
       name: r.name,
       stars: r.stargazers_count ?? 0,
@@ -159,6 +164,21 @@ export async function getFullProfile(username: string): Promise<GitHubProfile> {
       language: r.language ?? null,
       url: r.html_url,
       description: r.description ?? null,
+      isFork: r.fork,
+    }));
+
+  // 6. Tüm repolar (max 50, Proje Gezgini için)
+  const allRepos: TopRepo[] = [...repos]
+    .sort((a, b) => (b.stargazers_count ?? 0) - (a.stargazers_count ?? 0))
+    .slice(0, 50)
+    .map((r) => ({
+      name: r.name,
+      stars: r.stargazers_count ?? 0,
+      forks: r.forks_count ?? 0,
+      language: r.language ?? null,
+      url: r.html_url,
+      description: r.description ?? null,
+      isFork: r.fork,
     }));
 
   return {
@@ -180,5 +200,124 @@ export async function getFullProfile(username: string): Promise<GitHubProfile> {
 
     languageStats: normalizeLanguages(rawLangStats),
     topRepos,
+    allRepos,
   };
+}
+
+/**
+ * Verilen repo için README, son commit mesajları ve bağımlılık dosyalarını çeker.
+ * package.json (JS/TS), requirements.txt (Python) ve go.mod (Go) desteklenir.
+ */
+export async function getRepoDetails(username: string, repoName: string) {
+  // README çek (800 karakter — daha iyi bağlam için artırıldı)
+  let readme = "";
+  try {
+    const { data } = await octokit.request(
+      "GET /repos/{owner}/{repo}/readme",
+      { owner: username, repo: repoName }
+    );
+    readme = Buffer.from(data.content, "base64")
+      .toString("utf-8")
+      .slice(0, 800);
+  } catch {
+    // Erişim hatası veya README yok
+  }
+
+  // Son 15 commit mesajı + toplam sayım
+  let commits: string[] = [];
+  let commitCount = 0;
+  try {
+    const { data } = await octokit.request(
+      "GET /repos/{owner}/{repo}/commits",
+      { owner: username, repo: repoName, per_page: 15 }
+    );
+    commits = data.map((c) => c.commit.message.split("\n")[0]);
+    commitCount = data.length;
+  } catch {
+    // Commit erişim hatası
+  }
+
+  // package.json bağımlılıkları (JS/TS projeleri)
+  let deps: string[] = [];
+  try {
+    const { data } = await octokit.request(
+      "GET /repos/{owner}/{repo}/contents/{path}",
+      { owner: username, repo: repoName, path: "package.json" }
+    );
+    if ("content" in data && typeof data.content === "string") {
+      const pkg = JSON.parse(
+        Buffer.from(data.content, "base64").toString()
+      ) as {
+        dependencies?: Record<string, string>;
+        devDependencies?: Record<string, string>;
+      };
+      deps = [
+        ...Object.keys(pkg.dependencies ?? {}),
+        ...Object.keys(pkg.devDependencies ?? {}),
+      ];
+    }
+  } catch {
+    // package.json yok veya erişim hatası
+  }
+
+  // requirements.txt (Python projeleri)
+  let pythonDeps: string[] = [];
+  try {
+    const { data } = await octokit.request(
+      "GET /repos/{owner}/{repo}/contents/{path}",
+      { owner: username, repo: repoName, path: "requirements.txt" }
+    );
+    if ("content" in data && typeof data.content === "string") {
+      const raw = Buffer.from(data.content, "base64").toString("utf-8");
+      pythonDeps = raw
+        .split("\n")
+        .map((l) => l.split("==")[0].split(">=")[0].trim())
+        .filter((l) => l && !l.startsWith("#"))
+        .slice(0, 20);
+    }
+  } catch {
+    // requirements.txt yok — pyproject.toml dene
+    try {
+      const { data } = await octokit.request(
+        "GET /repos/{owner}/{repo}/contents/{path}",
+        { owner: username, repo: repoName, path: "pyproject.toml" }
+      );
+      if ("content" in data && typeof data.content === "string") {
+        const raw = Buffer.from(data.content, "base64").toString("utf-8");
+        // Basit regex: dependencies = [...] bloğundan paketleri çek
+        const match = raw.match(/dependencies\s*=\s*\[([\s\S]+?)\]/);
+        if (match) {
+          pythonDeps = match[1]
+            .split(",")
+            .map((l) => l.replace(/["'\s]/g, "").split(">=")[0].split("==")[0])
+            .filter(Boolean)
+            .slice(0, 20);
+        }
+      }
+    } catch {
+      // pyproject.toml da yok
+    }
+  }
+
+  // go.mod (Go projeleri)
+  let goDeps: string[] = [];
+  try {
+    const { data } = await octokit.request(
+      "GET /repos/{owner}/{repo}/contents/{path}",
+      { owner: username, repo: repoName, path: "go.mod" }
+    );
+    if ("content" in data && typeof data.content === "string") {
+      const raw = Buffer.from(data.content, "base64").toString("utf-8");
+      goDeps = raw
+        .split("\n")
+        .filter((l) => l.startsWith("\t") && !l.includes("//"))
+        .map((l) => l.trim().split(" ")[0])
+        .filter(Boolean)
+        .slice(0, 20);
+    }
+  } catch {
+    // go.mod yok
+  }
+
+  return { readme, commits, commitCount, deps, pythonDeps, goDeps };
 }

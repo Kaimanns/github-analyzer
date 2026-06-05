@@ -2,19 +2,35 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
-First, run the development server:
+### Environment variables
+
+Copy `.env.example` to `.env.local` and fill in the values:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cp .env.example .env.local
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Development
+
+#### Start both services (recommended)
+
+```bash
+npm run dev:full
+```
+
+This starts Next.js (port 3000) and the Flask ML API (port 5000) concurrently.
+Next.js logs appear in **cyan**, Flask logs in **yellow**.
+If either process crashes, the other is automatically stopped.
+
+#### Start services separately
+
+```bash
+# Terminal 1 — Next.js
+npm run dev
+
+# Terminal 2 — Flask ML API
+python ml/app.py
+```
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 

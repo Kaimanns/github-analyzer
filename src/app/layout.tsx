@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "GitHub Analyzer",
-  description: "GitHub profilini analiz et, kategorini öğren, gelişim yolunu gör.",
+  title: "GitHub Analyzer | AI Powered",
+  description: "GitHub profilini analiz et, yeteneklerini keşfet, yapay zeka destekli kariyer ve gelişim yolunu gör.",
 };
 
 export default function RootLayout({

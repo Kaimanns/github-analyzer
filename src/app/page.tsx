@@ -162,8 +162,12 @@ export default function Home() {
       </section>
 
       {/* ── Footer ── */}
-      <footer className="lp-footer">
-        <span>GitHub Analyzer · Powered by GitHub API</span>
+      <footer className="lp-footer" style={{ padding: "40px", color: "#8b949e", fontSize: "12px", display: "flex", justifyContent: "center", gap: "20px", opacity: 0.8 }}>
+        <span>Powered by OpenRouter AI</span>
+        <span>•</span>
+        <span>Next.js 16</span>
+        <span>•</span>
+        <span>Python ML Backend</span>
       </footer>
     </div>
   );

@@ -1,104 +1,131 @@
+"""
+train.py
+--------
+Random Forest Classifier ile model eğitimi.
+"""
 import numpy as np
 import pickle
-from sklearn.cluster import KMeans
+import json
+import sys
+from collections import Counter
+from pathlib import Path
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
-import os
+from sklearn.model_selection import cross_val_score, StratifiedKFold
 
-def generate_data():
-    np.random.seed(42)
-    
-    # Features: [js_ts_ratio, python_ratio, backend_ratio, repo_count, total_stars, account_age]
-    
-    # 100 Frontend: js_ts_ratio 0.55-0.95, others low
-    frontend_js_ts = np.random.uniform(0.55, 0.95, 100)
-    frontend_python = np.random.uniform(0.0, 0.1, 100)
-    frontend_backend = np.random.uniform(0.0, 0.1, 100)
-    frontend_repo = np.random.uniform(0.0, 0.3, 100)
-    frontend_stars = np.random.uniform(0.0, 0.2, 100)
-    frontend_age = np.random.uniform(0.1, 0.5, 100)
-    frontend = np.column_stack((frontend_js_ts, frontend_python, frontend_backend, frontend_repo, frontend_stars, frontend_age))
+if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8')
 
-    # 100 Data Science: python_ratio 0.45-0.90, others low
-    ds_js_ts = np.random.uniform(0.0, 0.2, 100)
-    ds_python = np.random.uniform(0.45, 0.90, 100)
-    ds_backend = np.random.uniform(0.0, 0.2, 100)
-    ds_repo = np.random.uniform(0.0, 0.5, 100)
-    ds_stars = np.random.uniform(0.0, 0.5, 100)
-    ds_age = np.random.uniform(0.1, 0.8, 100)
-    ds = np.column_stack((ds_js_ts, ds_python, ds_backend, ds_repo, ds_stars, ds_age))
+ML_DIR = Path(__file__).parent
+CATEGORIES = ["Frontend", "Data Science", "Backend", "DevOps", "Full-Stack"]
 
-    # 100 Backend: backend_ratio 0.45-0.85, others low
-    backend_js_ts = np.random.uniform(0.0, 0.2, 100)
-    backend_python = np.random.uniform(0.0, 0.2, 100)
-    backend_backend = np.random.uniform(0.45, 0.85, 100)
-    backend_repo = np.random.uniform(0.1, 0.6, 100)
-    backend_stars = np.random.uniform(0.0, 0.4, 100)
-    backend_age = np.random.uniform(0.2, 0.8, 100)
-    backend = np.column_stack((backend_js_ts, backend_python, backend_backend, backend_repo, backend_stars, backend_age))
 
-    # 100 DevOps: repo_count high, languages mixed, backend_ratio 0.2-0.4
-    devops_js_ts = np.random.uniform(0.1, 0.3, 100)
-    devops_python = np.random.uniform(0.1, 0.3, 100)
-    devops_backend = np.random.uniform(0.2, 0.4, 100)
-    devops_repo = np.random.uniform(0.6, 1.0, 100)  # repo_count high
-    devops_stars = np.random.uniform(0.1, 0.5, 100)
-    devops_age = np.random.uniform(0.4, 1.0, 100)
-    devops = np.column_stack((devops_js_ts, devops_python, devops_backend, devops_repo, devops_stars, devops_age))
+def normalize_features(row: dict) -> list[float]:
+    js_ts_ratio      = float(row.get("js_ts_ratio", 0))
+    python_ratio     = float(row.get("python_ratio", 0))
+    backend_ratio    = float(row.get("backend_ratio", 0))
+    devops_ratio     = float(row.get("devops_ratio", 0)) * 3.0
+    repo_count       = float(row.get("repo_count", 0)) / 100.0
+    total_stars      = float(row.get("total_stars", 0)) / 1000.0
+    account_age      = float(row.get("account_age_days", 0)) / 3650.0
+    fork_ratio       = float(row.get("fork_ratio", 0))
+    language_diversity = float(row.get("language_diversity", 0)) * 1.5
+    max_lang_ratio   = float(row.get("max_lang_ratio", 0))
+    return [
+        js_ts_ratio, python_ratio, backend_ratio, devops_ratio,
+        repo_count, total_stars, account_age, fork_ratio,
+        language_diversity, max_lang_ratio,
+    ]
 
-    # 100 Full-Stack: none dominant, js_ts_ratio 0.25-0.50, backend_ratio 0.20-0.40
-    fs_js_ts = np.random.uniform(0.25, 0.50, 100)
-    fs_python = np.random.uniform(0.05, 0.20, 100)
-    fs_backend = np.random.uniform(0.20, 0.40, 100)
-    fs_repo = np.random.uniform(0.2, 0.7, 100)
-    fs_stars = np.random.uniform(0.1, 0.6, 100)
-    fs_age = np.random.uniform(0.2, 0.9, 100)
-    fs = np.column_stack((fs_js_ts, fs_python, fs_backend, fs_repo, fs_stars, fs_age))
-
-    # Combine all
-    X = np.vstack((frontend, ds, backend, devops, fs))
-    return X
 
 def main():
-    print("Generating data...")
-    X = generate_data()
+    real_data_path = ML_DIR / "real_data.json"
+    if not real_data_path.exists():
+        print("[HATA] real_data.json bulunamadı!")
+        return
 
-    print("Scaling data...")
-    scaler = StandardScaler()
+    raw = json.loads(real_data_path.read_text(encoding="utf-8"))
+
+    X_list, y = [], []
+    for row in raw:
+        X_list.append(normalize_features(row))
+        y.append(row["category"])
+
+    X = np.array(X_list, dtype=float)
+    print(f"[OK] Veri yüklendi: {len(X)} profil")
+
+    dist = Counter(y)
+    print("Kategori dağılımı:")
+    for cat in CATEGORIES:
+        print(f"  {cat:16s}: {dist.get(cat, 0)}")
+
+    scaler   = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
-    print("Training KMeans model...")
-    kmeans = KMeans(n_clusters=5, random_state=42, n_init=10)
-    kmeans.fit(X_scaled)
+    # Cross-validation ile en iyi n_estimators bul
+    print("\nCross-validation (Stratified 5-fold)...")
+    best_n, best_score = 100, 0.0
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    for n in [50, 100, 200, 300]:
+        rf = RandomForestClassifier(
+            n_estimators=n,
+            max_depth=None,
+            min_samples_leaf=1,
+            random_state=42,
+            class_weight="balanced",
+        )
+        scores = cross_val_score(rf, X_scaled, y, cv=cv, scoring="accuracy")
+        print(f"  n_estimators={n}: {scores.mean():.1%} (±{scores.std():.1%})")
+        if scores.mean() > best_score:
+            best_score, best_n = scores.mean(), n
 
-    # Ensure ml directory exists
-    os.makedirs('ml', exist_ok=True)
+    print(f"\nSeçilen n_estimators={best_n} (CV: {best_score:.1%})")
 
-    print("Saving model and scaler to /ml...")
-    with open('ml/kmeans_model.pkl', 'wb') as f:
-        pickle.dump(kmeans, f)
-    with open('ml/scaler.pkl', 'wb') as f:
+    # Final modeli tüm veriyle eğit
+    rf = RandomForestClassifier(
+        n_estimators=best_n,
+        max_depth=None,
+        min_samples_leaf=1,
+        random_state=42,
+        class_weight="balanced",
+    )
+    rf.fit(X_scaled, y)
+
+    # Feature importance
+    feature_names = [
+        "js_ts_ratio", "python_ratio", "backend_ratio", "devops_ratio",
+        "repo_count", "total_stars", "account_age", "fork_ratio",
+        "language_diversity", "max_lang_ratio",
+    ]
+    print("\nFeature Importance:")
+    for name, imp in sorted(
+        zip(feature_names, rf.feature_importances_),
+        key=lambda x: -x[1]
+    ):
+        bar = "#" * int(imp * 100)
+        print(f"  {name:<22}: {imp:.3f} {bar}")
+
+    # Eğitim seti accuracy
+    train_preds = rf.predict(X_scaled)
+    correct = sum(p == t for p, t in zip(train_preds, y))
+    print(f"\nEğitim seti accuracy: {correct}/{len(y)} = {correct/len(y):.1%}")
+
+    # Detaylı tablo
+    print(f"\n{'Kullanici':<20} {'Gercek':<16} {'Tahmin':<16} {'Eslesti'}")
+    print("-" * 62)
+    for i, (pred, true_cat) in enumerate(zip(train_preds, y)):
+        sym      = "OK" if pred == true_cat else "XX"
+        username = raw[i]["username"]
+        print(f"{username:<20} {true_cat:<16} {pred:<16} {sym}")
+
+    # Kaydet
+    with open(ML_DIR / "rf_model.pkl", "wb") as f:
+        pickle.dump(rf, f)
+    with open(ML_DIR / "scaler.pkl", "wb") as f:
         pickle.dump(scaler, f)
 
-    print("Model and scaler saved successfully.")
+    print("\n[OK] rf_model.pkl ve scaler.pkl kaydedildi.")
 
-    print("\n--- Validation with 5 Test Examples ---")
-    
-    # Columns: js_ts_ratio, python_ratio, backend_ratio, repo_count, total_stars, account_age
-    test_examples = np.array([
-        [0.85, 0.05, 0.05, 0.2, 0.1, 0.3],  # Expected: Frontend
-        [0.1, 0.8, 0.1, 0.3, 0.2, 0.4],     # Expected: Data Science
-        [0.1, 0.1, 0.7, 0.4, 0.3, 0.5],     # Expected: Backend
-        [0.2, 0.2, 0.3, 0.9, 0.4, 0.8],     # Expected: DevOps
-        [0.35, 0.1, 0.3, 0.5, 0.4, 0.6]     # Expected: Full-Stack
-    ])
-    
-    test_scaled = scaler.transform(test_examples)
-    predictions = kmeans.predict(test_scaled)
-    
-    # Map predictions to possible categories (for human readability in test)
-    # We will do this formally in app.py based on cluster centers
-    for i, pred in enumerate(predictions):
-        print(f"Test Example {i+1} assigned to Cluster {pred}")
 
 if __name__ == "__main__":
     main()

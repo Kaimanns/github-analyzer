@@ -1,7 +1,9 @@
 import { getFullProfile } from "@/services/githubService";
-import { classifyDeveloper } from "@/lib/classifier";
+import { computeScores } from "@/lib/classifier";
+import { classifyWithML } from "@/lib/mlClassifier";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
+import { getRecommendations } from "@/lib/recommendations";
 import { NextResponse } from "next/server";
 
 export const maxDuration = 30;
@@ -29,8 +31,16 @@ export async function GET(request: Request) {
     // 1. GitHub verisi
     const profile = await getFullProfile(username);
 
-    // 2. Sınıflandırma
-    const devProfile = classifyDeveloper(profile);
+    // 2. ML Sınıflandırma (Flask K-Means, fallback: rule-based)
+    const mlResult = await classifyWithML(profile);
+    const scores = computeScores(profile);
+    const devProfile = {
+      category: mlResult.category,
+      classificationReason: mlResult.usedML
+        ? `ML (confidence: ${mlResult.confidence.toFixed(2)})`
+        : "rule-based fallback",
+      scores,
+    };
 
     // 3. Oturum — kim analiz yapıyor?
     const session = await auth();
@@ -76,7 +86,15 @@ export async function GET(request: Request) {
       .catch((e: unknown) => console.warn("[analyze] DB kayıt başarısız (devam):", e));
 
     // 5. Birleşik yanıt — DB beklenmeden hemen dön
-    return NextResponse.json({ profile, devProfile });
+    return NextResponse.json({ 
+      profile, 
+      devProfile, 
+      usedML: mlResult.usedML,
+      recommendations: getRecommendations(
+        devProfile.category, 
+        profile.languageStats
+      )
+    });
   } catch (error) {
     console.error("[analyze] Hata:", error);
     const message =
